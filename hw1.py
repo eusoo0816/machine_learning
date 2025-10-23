@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ========= 通用小工具 =========
+# ========= WORK =========
 def make_blobs(n_samples=600, centers=2, dim=2, spread=1.2, seed=0):
     rng = np.random.default_rng(seed)
     means = rng.uniform(-3, 3, size=(centers, dim))
