@@ -71,7 +71,7 @@ class LinearSVMTrace:
 
                     dw = self.w - w_before
 
-                    # ---- 可視化/追蹤 ----
+                    # ----  PRINT----
                     if step < self.verbose_first_n:
                         print(f"[SVM step {step}]")
                         print("  w(before)=", w_before)
