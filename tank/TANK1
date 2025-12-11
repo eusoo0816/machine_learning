@@ -1,0 +1,598 @@
+import pygame
+import random
+import math
+import sys
+
+# ===================== 基本設定 =====================
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
+
+WORLD_WIDTH  = SCREEN_WIDTH
+WORLD_HEIGHT = SCREEN_HEIGHT
+
+FPS = 60
+GAME_TIME_SECONDS = 180  # 180 秒對戰
+
+TANK_SPEED = 8
+TANK_ROT_STEP = 45
+TURRET_ROT_STEP = 45
+BULLET_SPEED = 14
+
+MAX_LIFE = 3      #生命
+MAX_FUEL = 100     #燃料上限
+MAX_AMMO = 20        #彈藥上限
+
+FUEL_SUPPLY_AMOUNT = 30    #燃料補給
+AMMO_SUPPLY_AMOUNT = 20      #彈藥補給
+
+SUPPLY_RESPAWN_FRAMES = 30  # 被吃掉或被打掉後 30 幀重生
+
+# 顏色
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GREEN = (0, 200, 0)
+BLUE = (0, 128, 255)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
+GREY = (120, 120, 120)
+DARKGREY = (50, 50, 50)
+
+
+# ===================== 小工具函式 =====================
+def clamp(value, mn, mx):
+    return max(mn, min(mx, value))
+
+
+def angle_to_vector(angle_deg):
+    rad = math.radians(angle_deg)
+    return math.cos(rad), math.sin(rad)
+
+
+# ===================== 類別定義 =====================
+class Tank:
+    def __init__(self, x, y, color, team_name, controls):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.team_name = team_name
+
+        self.body_angle = 0       # 車身角度
+        self.turret_angle = 0     # 砲管角度（世界座標）
+        self.radius = 20          # 當碰撞圓半徑
+
+        self.life = MAX_LIFE
+        self.fuel = MAX_FUEL
+        self.ammo = MAX_AMMO
+        self.alive = True
+
+        # 控制鍵對應（字典）
+        self.controls = controls
+        # 這兩個是連按用（按住就一直動）
+        self.move_forward = False
+        self.move_backward = False
+        self.move_left = False     # 新：向左平移
+        self.move_right = False    # 新：向右平移
+
+
+    def update(self):
+        if not self.alive:
+            return
+
+        dx = 0
+        dy = 0
+
+        if self.fuel > 0:
+            # 絕對方向移動：
+            #   上：y -
+            #   下：y +
+            #   左：x -
+            #   右：x +
+            if self.move_forward:      # up / W
+                dy -= TANK_SPEED
+            if self.move_backward:     # down / S
+                dy += TANK_SPEED
+            if self.move_left:         # left / A
+                dx -= TANK_SPEED
+            if self.move_right:        # right / D
+                dx += TANK_SPEED
+
+        # 只要有動就扣油
+        if dx != 0 or dy != 0:
+            self.fuel = max(0, self.fuel - 0.1)
+
+        self.x += dx
+        self.y += dy
+
+        self.x = clamp(self.x, self.radius, WORLD_WIDTH  - self.radius)
+        self.y = clamp(self.y, self.radius, WORLD_HEIGHT - self.radius)
+
+
+
+    def draw(self, surface, camera_offset):
+        if not self.alive:
+            return
+
+        cx = int(self.x - camera_offset[0])
+        cy = int(self.y - camera_offset[1])
+
+        # 車身：用一個旋轉矩形表示
+        body_surf = pygame.Surface((40, 30), pygame.SRCALPHA)
+        pygame.draw.rect(body_surf, self.color, (0, 0, 40, 30))
+        rotated_body = pygame.transform.rotate(body_surf, -self.body_angle)
+        rect = rotated_body.get_rect(center=(cx, cy))
+        surface.blit(rotated_body, rect.topleft)
+
+        # 砲管：由中心畫一條線出去
+        tx, ty = angle_to_vector(self.turret_angle)
+        gun_len = 30
+        end_x = cx + int(tx * gun_len)
+        end_y = cy + int(ty * gun_len)
+        pygame.draw.line(surface, YELLOW, (cx, cy), (end_x, end_y), 4)
+
+        # 生命條 / 油量 / 彈藥 (簡單畫在頭上)
+        bar_w = 40
+        # life
+        pygame.draw.rect(surface, DARKGREY, (cx - bar_w // 2, cy - 40, bar_w, 5))
+        life_ratio = self.life / MAX_LIFE
+        pygame.draw.rect(surface, RED, (cx - bar_w // 2, cy - 40, int(bar_w * life_ratio), 5))
+        # fuel
+        pygame.draw.rect(surface, DARKGREY, (cx - bar_w // 2, cy - 34, bar_w, 5))
+        fuel_ratio = self.fuel / MAX_FUEL
+        pygame.draw.rect(surface, GREEN, (cx - bar_w // 2, cy - 34, int(bar_w * fuel_ratio), 5))
+        # ammo
+        pygame.draw.rect(surface, DARKGREY, (cx - bar_w // 2, cy - 28, bar_w, 5))
+        ammo_ratio = self.ammo / MAX_AMMO
+        pygame.draw.rect(surface, BLUE, (cx - bar_w // 2, cy - 28, int(bar_w * ammo_ratio), 5))
+
+    def respawn(self, x, y):
+        self.x = x
+        self.y = y
+        self.life = MAX_LIFE
+        self.fuel = MAX_FUEL
+        self.ammo = MAX_AMMO
+        self.alive = True
+        self.body_angle = 0
+        self.turret_angle = 0
+
+    def hit_by_bullet(self):
+        if not self.alive:
+            return False
+
+        self.life -= 1
+        if self.life <= 0:
+            self.alive = False
+            return True   # 回傳 True 表示這次打掉一條命
+        return False
+
+
+class Bullet:
+    def __init__(self, x, y, angle_deg, team_name):
+        self.x = x
+        self.y = y
+        self.angle = angle_deg
+        self.team_name = team_name
+        self.radius = 4
+        self.alive = True
+
+    def update(self):
+        vx, vy = angle_to_vector(self.angle)
+        self.x += vx * BULLET_SPEED
+        self.y += vy * BULLET_SPEED
+
+        # 飛出世界就消失
+        if self.x < 0 or self.x > WORLD_WIDTH or self.y < 0 or self.y > WORLD_HEIGHT:
+            self.alive = False
+
+    def draw(self, surface, camera_offset):
+        if not self.alive:
+            return
+        cx = int(self.x - camera_offset[0])
+        cy = int(self.y - camera_offset[1])
+        pygame.draw.circle(surface, YELLOW, (cx, cy), self.radius)
+
+
+class Wall:
+    def __init__(self, x, y, w, h):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.max_hp = 3
+        self.hp = 3
+
+    def is_destroyed(self):
+        return self.hp <= 0
+
+    def hit(self):
+        if self.hp > 0:
+            self.hp -= 1
+
+    def draw(self, surface, camera_offset):
+        if self.is_destroyed():
+            return
+
+        # 依 HP 設透明度
+        if self.hp == 3:
+            alpha = 255
+        elif self.hp == 2:
+            alpha = 170
+        else:  # hp == 1
+            alpha = 85
+
+        wall_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        wall_surf.fill((*GREY, alpha))
+        surface.blit(
+            wall_surf,
+            (self.rect.x - camera_offset[0], self.rect.y - camera_offset[1])
+        )
+
+
+class Supply:
+    def __init__(self, supply_type, x, y):
+        self.type = supply_type  # "fuel" or "ammo"
+        self.rect = pygame.Rect(x, y, 30, 30)
+        self.active = True
+        self.respawn_timer = 0
+
+    def update(self):
+        if not self.active:
+            self.respawn_timer -= 1
+            if self.respawn_timer <= 0:
+                # 隨機位置重生
+                self.rect.x = random.randint(0, WORLD_WIDTH - self.rect.width)
+                self.rect.y = random.randint(0, WORLD_HEIGHT - self.rect.height)
+                self.active = True
+
+    def consume(self):
+        self.active = False
+        self.respawn_timer = SUPPLY_RESPAWN_FRAMES
+
+    def draw(self, surface, camera_offset):
+        if not self.active:
+            return
+        x = self.rect.x - camera_offset[0]
+        y = self.rect.y - camera_offset[1]
+        color = GREEN if self.type == "fuel" else BLUE
+        pygame.draw.rect(surface, color, (x, y, self.rect.width, self.rect.height))
+        # 中間畫一個字母
+        font = pygame.font.SysFont(None, 18)
+        text = "F" if self.type == "fuel" else "A"
+        t_surf = font.render(text, True, WHITE)
+        t_rect = t_surf.get_rect(center=(x + self.rect.width // 2, y + self.rect.height // 2))
+        surface.blit(t_surf, t_rect)
+
+
+# ===================== 遊戲主程式 =====================
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    pygame.display.set_caption("坦克大戰 - Green vs Blue")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 28)
+    big_font = pygame.font.SysFont(None, 48)
+
+    # ---- 鏡頭（遊戲畫面位移） ----
+    camera_x = 0
+    camera_y = 0
+    CAMERA_SPEED = 15
+
+    # ---- 兩隊分數 ----
+    team_scores = {
+        "Green": 0,
+        "Blue": 0
+    }
+
+    # ---- 玩家設定 ----
+    # 控制鍵對應
+    controls_p1 = {
+    "up": pygame.K_UP,
+    "down": pygame.K_DOWN,
+    "left": pygame.K_LEFT,
+    "right": pygame.K_RIGHT,
+    "fire": pygame.K_m
+    }
+
+    controls_p2 = {
+    "up": pygame.K_w,    # W = 上
+    "down": pygame.K_s,  # S = 下
+    "left": pygame.K_a,  # A = 左
+    "right": pygame.K_d, # D = 右
+    "fire": pygame.K_f,
+    }
+
+
+
+    # spawn 點
+    spawn_green = (300, 300)
+    spawn_blue = (SCREEN_WIDTH - 300, SCREEN_HEIGHT - 300)
+
+    tank1 = Tank(*spawn_green, GREEN, "Green", controls_p1)
+    tank2 = Tank(*spawn_blue, RED, "Blue", controls_p2)
+    tanks = [tank1, tank2]
+
+    # ---- 牆壁 ----
+    walls = []
+    BORDER_THICKNESS = 40
+
+    # 上邊界
+    walls.append(Wall(0, 0, WORLD_WIDTH, BORDER_THICKNESS))
+    # 下邊界
+    walls.append(Wall(0, WORLD_HEIGHT - BORDER_THICKNESS, WORLD_WIDTH, BORDER_THICKNESS))
+    # 左邊界
+    walls.append(Wall(0, 0, BORDER_THICKNESS, WORLD_HEIGHT))
+    # 右邊界
+    walls.append(Wall(WORLD_WIDTH - BORDER_THICKNESS, 0, BORDER_THICKNESS, WORLD_HEIGHT))
+
+    # 簡單放幾個牆
+    for i in range(5):
+        x = 500 + i * 200
+        y = 800
+        walls.append(Wall(x, y, 120, 40))
+    for i in range(3):
+        x = 800
+        y = 400 + i * 200
+        walls.append(Wall(x, y, 40, 120))
+
+    # ---- 補給站 ----
+    supplies = []
+    for _ in range(3):
+        x = random.randint(0, WORLD_WIDTH - 30)
+        y = random.randint(0, WORLD_HEIGHT - 30)
+        supplies.append(Supply("fuel", x, y))
+    for _ in range(3):
+        x = random.randint(0, WORLD_WIDTH - 30)
+        y = random.randint(0, WORLD_HEIGHT - 30)
+        supplies.append(Supply("ammo", x, y))
+
+    bullets = []
+
+    start_ticks = pygame.time.get_ticks()
+    game_over = False
+    winner_text = ""
+
+    # ========================= 主迴圈 =========================
+    while True:
+        dt = clock.tick(FPS)
+
+        # ---- 計算剩餘時間 ----
+        elapsed_ms = pygame.time.get_ticks() - start_ticks
+        remain_sec = max(0, GAME_TIME_SECONDS - int(elapsed_ms / 1000))
+
+        # 事件處理（按鍵一次性）
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            # ESC 結束
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                pygame.quit()
+                sys.exit()
+
+            # 控制坦克（按下）
+            if event.type == pygame.KEYDOWN:
+                for tank in tanks:
+                    if not tank.alive:
+                        continue
+                    c = tank.controls
+
+                    # === 方向鍵：控制移動 + 設定砲管朝向 ===
+                    if event.key == c["up"]:
+                        tank.move_forward = True
+                        tank.turret_angle = 270     # 朝「上」
+                    if event.key == c["down"]:
+                        tank.move_backward = True
+                        tank.turret_angle = 90      # 朝「下」
+                    if event.key == c["left"]:
+                        tank.move_left = True       # 或 turn_left，看你原本用哪個
+                        tank.turret_angle = 180     # 朝「左」
+                    if event.key == c["right"]:
+                        tank.move_right = True      # 或 turn_right
+                        tank.turret_angle = 0       # 朝「右」
+
+                    # === 砲管旋轉鍵：不再使用，可直接刪掉或註解掉 ===
+                    # if event.key == c["turret_left"]:
+                    #     tank.turret_angle = (tank.turret_angle - TURRET_ROT_STEP) % 360
+                    # if event.key == c["turret_right"]:
+                    #     tank.turret_angle = (tank.turret_angle + TURRET_ROT_STEP) % 360
+
+                    # 射擊照舊
+                    if event.key == c["fire"]:
+                        if tank.ammo > 0 and tank.alive and not game_over:
+                            tx, ty = angle_to_vector(tank.turret_angle)
+                            bx = tank.x + tx * 30
+                            by = tank.y + ty * 30
+                            bullets.append(Bullet(bx, by, tank.turret_angle, tank.team_name))
+                            tank.ammo -= 1
+
+
+                # 鏡頭移動鍵（IJKL）
+                if event.key == pygame.K_i:
+                    camera_y -= CAMERA_SPEED
+                if event.key == pygame.K_k:
+                    camera_y += CAMERA_SPEED
+                if event.key == pygame.K_j:
+                    camera_x -= CAMERA_SPEED
+                if event.key == pygame.K_l:
+                    camera_x += CAMERA_SPEED
+
+            # 控制坦克（放開）
+            if event.type == pygame.KEYUP:
+                for tank in tanks:
+                    c = tank.controls
+                    if event.key == c["up"]:
+                        tank.move_forward = False
+                    if event.key == c["down"]:
+                        tank.move_backward = False
+                    if event.key == c["left"]:
+                        tank.move_left = False
+                    if event.key == c["right"]:
+                        tank.move_right = False
+
+
+        # ---- 遊戲結束後就不再更新邏輯，只顯示結果 ----
+        if not game_over:
+            # 更新坦克
+            for tank in tanks:
+                tank.update()
+
+            # 更新子彈
+            for bullet in bullets:
+                bullet.update()
+
+            bullets = [b for b in bullets if b.alive]
+
+            # 更新補給站
+            for s in supplies:
+                s.update()
+
+            # ---- 子彈碰撞檢查 ----
+            for bullet in bullets:
+                if not bullet.alive:
+                    continue
+
+                # 撞坦克
+                for tank in tanks:
+                    if not tank.alive:
+                        continue
+                    if tank.team_name == bullet.team_name:
+                        continue  # 不打自己隊
+
+                    dx = bullet.x - tank.x
+                    dy = bullet.y - tank.y
+                    dist = math.hypot(dx, dy)
+                    if dist <= bullet.radius + tank.radius:
+                        bullet.alive = False
+                        # 生命 -1
+                        killed = tank.hit_by_bullet()
+                        if killed:
+                            # 敵方失去的生命次數 * 20 分
+                            team_scores[bullet.team_name] += 20
+                            # 被打死就重生
+                            if tank.team_name == "Green":
+                                tank.respawn(*spawn_green)
+                            else:
+                                tank.respawn(*spawn_blue)
+                        break
+
+                # 撞牆
+                if bullet.alive:
+                    for wall in walls:
+                        if wall.is_destroyed():
+                            continue
+                        # 把子彈當成點作 rect 碰撞
+                        if wall.rect.collidepoint(bullet.x, bullet.y):
+                            bullet.alive = False
+                            # 每擊中一次牆壁 +1 分
+                            team_scores[bullet.team_name] += 1
+                            wall.hit()
+                            # 若這一擊打爆牆，再 +5 分
+                            if wall.is_destroyed():
+                                team_scores[bullet.team_name] += 5
+                            break
+
+                # 撞補給站（bullet 也會把補給打掉）
+                if bullet.alive:
+                    for s in supplies:
+                        if s.active and s.rect.collidepoint(bullet.x, bullet.y):
+                            bullet.alive = False
+                            s.consume()
+                            break
+
+            bullets = [b for b in bullets if b.alive]
+
+            # ---- 坦克 / 補給站碰撞 ----
+            for tank in tanks:
+                if not tank.alive:
+                    continue
+                t_rect = pygame.Rect(0, 0, tank.radius * 2, tank.radius * 2)
+                t_rect.center = (tank.x, tank.y)
+                for s in supplies:
+                    if s.active and t_rect.colliderect(s.rect):
+                        if s.type == "fuel":
+                            tank.fuel = min(MAX_FUEL, tank.fuel + FUEL_SUPPLY_AMOUNT)
+                        else:
+                            tank.ammo = min(MAX_AMMO, tank.ammo + AMMO_SUPPLY_AMOUNT)
+                        s.consume()
+
+            # ---- 檢查時間 / 勝負 ----
+            if remain_sec <= 0:
+                game_over = True
+                if team_scores["Green"] > team_scores["Blue"]:
+                    winner_text = "時間到！Green Team 勝利！"
+                elif team_scores["Blue"] > team_scores["Green"]:
+                    winner_text = "時間到！Blue Team 勝利！"
+                else:
+                    winner_text = "時間到！雙方平手！"
+
+        # ========================= 畫面繪製 =========================
+        screen.fill((30, 30, 30))
+
+        # 畫世界邊界
+        # 只畫在可視範圍附近
+        pygame.draw.rect(
+            screen,
+            DARKGREY,
+            (-camera_x, -camera_y, WORLD_WIDTH, WORLD_HEIGHT),
+            4
+        )
+
+        # 畫牆
+        for wall in walls:
+            wall.draw(screen, (camera_x, camera_y))
+
+        # 畫補給站
+        for s in supplies:
+            s.draw(screen, (camera_x, camera_y))
+
+        # 畫坦克 & 子彈
+        for tank in tanks:
+            tank.draw(screen, (camera_x, camera_y))
+
+        for bullet in bullets:
+            bullet.draw(screen, (camera_x, camera_y))
+
+        # ---- UI：分數 / 時間 / 簡易資訊 ----
+        ui_y = 10
+        text = font.render(f"GreenTeam 分數: {team_scores['Green']}", True, GREEN)
+        screen.blit(text, (10, ui_y))
+        ui_y += 28
+        text = font.render(f"BlueTeam 分數: {team_scores['Blue']}", True, BLUE)
+        screen.blit(text, (10, ui_y))
+        ui_y += 28
+        text = font.render(f"剩餘時間: {remain_sec} 秒", True, WHITE)
+        screen.blit(text, (10, ui_y))
+        ui_y += 28
+
+        # 玩家狀態
+        p1_info = font.render(
+            f"P1(綠): HP {tank1.life} / Fuel {int(tank1.fuel)} / Ammo {tank1.ammo}",
+            True, GREEN
+        )
+        p2_info = font.render(
+            f"P2(藍): HP {tank2.life} / Fuel {int(tank2.fuel)} / Ammo {tank2.ammo}",
+            True, BLUE
+        )
+        screen.blit(p1_info, (10, ui_y))
+        ui_y += 28
+        screen.blit(p2_info, (10, ui_y))
+        ui_y += 28
+
+        # 鏡頭提示
+        cam_info = font.render("I/J/K/L 移動畫面  |  ESC 離開", True, WHITE)
+        screen.blit(cam_info, (10, SCREEN_HEIGHT - 30))
+
+        # 遊戲結束訊息
+        if game_over:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 150))
+            screen.blit(overlay, (0, 0))
+            wt = big_font.render(winner_text, True, WHITE)
+            wt_rect = wt.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
+            screen.blit(wt, wt_rect)
+            tip = font.render("按 ESC 離開遊戲", True, WHITE)
+            tip_rect = tip.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20))
+            screen.blit(tip, tip_rect)
+
+        pygame.display.flip()
+
+
+if __name__ == "__main__":
+    main()
