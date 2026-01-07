@@ -60,18 +60,11 @@ API
 
 
 
-1-5 驗收標準(Acceptance Criteria)
----
-1.遊戲能載入模型與訓練用AI對打
-2.能夠閃躲子彈
-3.可以吃油補包
-4.會朝敵人開火
-5.會透過吃彈藥包補充子彈
 
 ---
 決策樹(Decision tree)
 ---
-
+https://github.com/eusoo0816/machine_learning/issues/5
 
 資料蒐集策略
 ---
