@@ -72,7 +72,7 @@ https://github.com/eusoo0816/machine_learning/issues/5
 ai策略為一直開火  
 1.會閃子彈  
 2.會一直吃補包(油、彈藥)  
-資料參數:https://github.com/eusoo0816/machine_learning/issues/2
+蒐集資料:https://github.com/eusoo0816/machine_learning/issues/2
 
 成果
 ===
