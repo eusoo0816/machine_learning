@@ -68,7 +68,7 @@ https://github.com/eusoo0816/machine_learning/issues/5
 
 資料蒐集策略
 ---
-將遊戲內子彈數調高
+將遊戲內子彈數調高使
 ai策略為一直開火  
 1.會閃子彈  
 2.會一直吃補包(油、彈藥)  
