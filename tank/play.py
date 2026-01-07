@@ -544,19 +544,42 @@ class ModelTankAI:
 
 
 # ===================== 規則型 AI（不用模型） =====================
-class RuleBasedAI:
+class StrongAI:
     """
-    一個簡單但好用的 AI：
-    - 優先躲子彈（近距離）
-    - 燃料/彈藥低就去撿補包
-    - 否則追敵人
-    - 有視線 + 瞄準誤差小就開火
+    更強的規則AI：
+    1) 預判射擊（lead）
+    2) 簡易格子路徑 BFS 繞牆
+    3) 視線被牆擋住時：會先拆牆（朝最近阻擋點方向射）
+    4) 近距離會拉距離/側移
+    5) 子彈太近優先閃避
     """
     def __init__(self):
-        self.aim_fire_threshold = 10     # 瞄準誤差 < 10 度就開火
-        self.evade_bullet_dist = 140     # 子彈距離 < 140 就閃
-        self.low_fuel = 25
-        self.low_ammo = 5
+        # 射擊與戰術參數
+        self.aim_fire_threshold = 12          # 瞄準誤差 < 8 度就開火
+        self.fire_cooldown_frames = 4       # 控制射速（越小越兇）10
+        self._fire_cd = 0
+
+        self.evade_bullet_dist = 160         # 子彈距離 < 160 開始閃
+        self.kite_dist = 220                 # 太近就拉距離
+        self.strafe_dist = 260               # 中距離會側移
+
+        self.low_fuel = 20
+        self.low_ammo = 4
+
+        # 導航格子
+        self.cell = 40                       # 格子大小（跟牆厚/坦克半徑差不多）
+        self.max_bfs_nodes = 2500            # BFS 上限避免太慢
+
+    # ---------- 小工具 ----------
+    def _would_collide_wall(self, nx, ny, tank, walls):
+        r = pygame.Rect(0, 0, tank.radius * 2, tank.radius * 2)
+        r.center = (nx, ny)
+        for w in walls:
+            if w.is_destroyed():
+                continue
+            if r.colliderect(w.rect):
+                return True
+        return False
 
     def _nearest_supply(self, tank, supplies, stype):
         best = None
@@ -571,7 +594,7 @@ class RuleBasedAI:
             if d < best_d:
                 best_d = d
                 best = (sx, sy, d)
-        return best  # (x,y,d) or None
+        return best
 
     def _nearest_threat_bullet(self, tank, bullets):
         best = None
@@ -587,18 +610,83 @@ class RuleBasedAI:
                 best = (b.x, b.y, d, b.angle)
         return best
 
-    def _would_collide_wall(self, nx, ny, tank, walls):
-        r = pygame.Rect(0, 0, tank.radius * 2, tank.radius * 2)
-        r.center = (nx, ny)
-        for w in walls:
-            if w.is_destroyed():
-                continue
-            if r.colliderect(w.rect):
-                return True
-        return False
+    def _grid_coord(self, x, y):
+        return int(x // self.cell), int(y // self.cell)
 
-    def _best_move_toward(self, tank, target_x, target_y, walls):
-        # 在 5 個動作中挑一個：不撞牆且離目標最近
+    def _grid_center(self, gx, gy):
+        return gx * self.cell + self.cell * 0.5, gy * self.cell + self.cell * 0.5
+
+    def _build_blocked_grid(self, tank, walls):
+        gw = int(WORLD_WIDTH // self.cell) + 1
+        gh = int(WORLD_HEIGHT // self.cell) + 1
+        blocked = [[False for _ in range(gh)] for _ in range(gw)]
+
+        # 對每個格子中心點，若坦克站那裡會撞牆就視為 blocked
+        # 這樣 BFS 走格子時就能「繞牆」
+        for gx in range(gw):
+            for gy in range(gh):
+                cx, cy = self._grid_center(gx, gy)
+                if cx < tank.radius or cx > WORLD_WIDTH - tank.radius:
+                    blocked[gx][gy] = True
+                    continue
+                if cy < tank.radius or cy > WORLD_HEIGHT - tank.radius:
+                    blocked[gx][gy] = True
+                    continue
+                if self._would_collide_wall(cx, cy, tank, walls):
+                    blocked[gx][gy] = True
+        return blocked, gw, gh
+
+    def _bfs_next_step(self, tank, target_x, target_y, walls):
+        # BFS 找下一步格子（回傳下一個 waypoint）
+        blocked, gw, gh = self._build_blocked_grid(tank, walls)
+        sx, sy = self._grid_coord(tank.x, tank.y)
+        tx, ty = self._grid_coord(target_x, target_y)
+
+        sx = clamp(sx, 0, gw - 1); sy = clamp(sy, 0, gh - 1)
+        tx = clamp(tx, 0, gw - 1); ty = clamp(ty, 0, gh - 1)
+
+        if blocked[sx][sy]:
+            # 若起點剛好被判 blocked，就直接不走 BFS
+            return None
+
+        from collections import deque
+        q = deque()
+        q.append((sx, sy))
+        prev = { (sx, sy): None }
+        visited = 1
+
+        # 4-neighbor
+        dirs = [(1,0),(-1,0),(0,1),(0,-1)]
+
+        while q and visited < self.max_bfs_nodes:
+            x, y = q.popleft()
+            if (x, y) == (tx, ty):
+                break
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if nx < 0 or nx >= gw or ny < 0 or ny >= gh:
+                    continue
+                if blocked[nx][ny]:
+                    continue
+                if (nx, ny) in prev:
+                    continue
+                prev[(nx, ny)] = (x, y)
+                q.append((nx, ny))
+                visited += 1
+
+        if (tx, ty) not in prev:
+            return None  # 找不到路
+
+        # 回溯，取「從起點走的第一步」
+        cur = (tx, ty)
+        while prev[cur] is not None and prev[cur] != (sx, sy):
+            cur = prev[cur]
+        if prev[cur] is None:
+            return None
+        wx, wy = self._grid_center(cur[0], cur[1])
+        return (wx, wy)
+
+    def _best_move_toward_point(self, tank, px, py, walls):
         candidates = [
             (MOVE_STOP, 0, 0),
             (MOVE_UP, 0, -TANK_SPEED),
@@ -612,35 +700,51 @@ class RuleBasedAI:
         for cmd, dx, dy in candidates:
             nx = clamp(tank.x + dx, tank.radius, WORLD_WIDTH - tank.radius)
             ny = clamp(tank.y + dy, tank.radius, WORLD_HEIGHT - tank.radius)
-
             if self._would_collide_wall(nx, ny, tank, walls):
                 continue
-
-            score = dist_xy(nx, ny, target_x, target_y)
+            score = dist_xy(nx, ny, px, py)
             if score < best_score:
                 best_score = score
                 best_cmd = cmd
-
         return best_cmd
+
+    def _lead_angle(self, shooter, target):
+        # 簡單預判：用 target 速度估計未來位置
+        tx, ty = target.x, target.y
+        tvx, tvy = target.vx(), target.vy()
+        dx = tx - shooter.x
+        dy = ty - shooter.y
+        d = math.hypot(dx, dy)
+
+        # 子彈到達時間 ~ 距離 / 速度
+        t = d / max(BULLET_SPEED, 1e-6)
+
+        # 預估目標未來位置（加一點限幅避免爆走）
+        fx = tx + clamp(tvx, -TANK_SPEED, TANK_SPEED) * t
+        fy = ty + clamp(tvy, -TANK_SPEED, TANK_SPEED) * t
+
+        # 夾回地圖內
+        fx = clamp(fx, 0, WORLD_WIDTH)
+        fy = clamp(fy, 0, WORLD_HEIGHT)
+
+        return vector_to_angle_deg(fx - shooter.x, fy - shooter.y)
 
     def decide(self, tank, enemy, supplies, walls, bullets):
         if (not tank.alive) or (not enemy.alive):
             return MOVE_STOP, 0, tank.turret_angle
 
-        # 1) 瞄準敵人（砲塔永遠朝敵）
-        dx = enemy.x - tank.x
-        dy = enemy.y - tank.y
-        angle_to_enemy = vector_to_angle_deg(dx, dy)
-        turret_cmd = angle_to_enemy
+        # cooldown
+        if self._fire_cd > 0:
+            self._fire_cd -= 1
 
-        # 2) 子彈閃避（很近就閃）
+        # 1) 子彈閃避（優先）
+        # 1) 子彈閃避（優先）— 改成「邊閃邊射」
         nb = self._nearest_threat_bullet(tank, bullets)
         if nb is not None:
             bx, by, bd, b_ang = nb
             if bd < self.evade_bullet_dist:
-                # 往「垂直於子彈->坦克方向」閃
-                ux, uy = safe_unit(tank.x - bx, tank.y - by)  # 由子彈指向自己
-                # 兩個垂直方向挑一個不撞牆、且離子彈更遠
+                # 往子彈->坦克向量的垂直方向閃
+                ux, uy = safe_unit(tank.x - bx, tank.y - by)
                 px1, py1 = -uy, ux
                 px2, py2 = uy, -ux
 
@@ -652,39 +756,96 @@ class RuleBasedAI:
                 ok1 = not self._would_collide_wall(t1x, t1y, tank, walls)
                 ok2 = not self._would_collide_wall(t2x, t2y, tank, walls)
 
+                # 邊閃邊用預判瞄準敵人
+                turret_cmd = self._lead_angle(tank, enemy)
+
+                # 決定要往哪側閃
                 if ok1 or ok2:
                     d1 = dist_xy(t1x, t1y, bx, by) if ok1 else -1
                     d2 = dist_xy(t2x, t2y, bx, by) if ok2 else -1
-                    # 用 best_move_toward 把目標設到閃避點
                     if d1 >= d2:
-                        move_cmd = self._best_move_toward(tank, t1x, t1y, walls)
+                        move_cmd = self._best_move_toward_point(tank, t1x, t1y, walls)
                     else:
-                        move_cmd = self._best_move_toward(tank, t2x, t2y, walls)
-                    # 近距離就不硬開火，優先保命
-                    return move_cmd, 0, turret_cmd
+                        move_cmd = self._best_move_toward_point(tank, t2x, t2y, walls)
+                else:
+                    move_cmd = MOVE_STOP
 
-        # 3) 目標選擇：低資源就去撿補包，不然追敵
+                # ====== 這裡是新增：閃避時也允許射擊 ======
+                fire_cmd = 0
+                if tank.ammo > 0 and self._fire_cd == 0:
+                    # 閃避時放寬一點角度門檻（比較容易射）
+                    aim_err = angle_diff_deg(tank.turret_angle, turret_cmd)
+                    if aim_err <= max(self.aim_fire_threshold, 18):
+                        fire_cmd = 1
+                        self._fire_cd = self.fire_cooldown_frames
+
+                return move_cmd, fire_cmd, turret_cmd
+
+
+        # 2) 砲塔：預判瞄準敵人（比死瞄準強）
+        turret_cmd = self._lead_angle(tank, enemy)
+
+        # 3) 決定戰略目標（補包 or 壓制）
         target_x, target_y = enemy.x, enemy.y
+        want_supply = False
 
         if tank.fuel < self.low_fuel:
             s = self._nearest_supply(tank, supplies, "fuel")
             if s is not None:
                 target_x, target_y, _ = s
+                want_supply = True
 
         if tank.ammo < self.low_ammo:
             s = self._nearest_supply(tank, supplies, "ammo")
             if s is not None:
                 target_x, target_y, _ = s
+                want_supply = True
 
-        move_cmd = self._best_move_toward(tank, target_x, target_y, walls)
+        # 4) 走位（繞牆 BFS waypoint）
+        wp = self._bfs_next_step(tank, target_x, target_y, walls)
+        if wp is None:
+            move_cmd = self._best_move_toward_point(tank, target_x, target_y, walls)
+        else:
+            move_cmd = self._best_move_toward_point(tank, wp[0], wp[1], walls)
 
-        # 4) 開火條件：有視線 + 瞄準夠準 + 有子彈
+        # 5) 拉距離/側移（打架更像人）
+        d_enemy = dist_xy(tank.x, tank.y, enemy.x, enemy.y)
+        if not want_supply:
+            if d_enemy < self.kite_dist:
+                # 後退（往遠離敵人的方向）
+                ax, ay = safe_unit(tank.x - enemy.x, tank.y - enemy.y)
+                px = tank.x + ax * TANK_SPEED
+                py = tank.y + ay * TANK_SPEED
+                move_cmd = self._best_move_toward_point(tank, px, py, walls)
+            elif d_enemy < self.strafe_dist:
+                # 側移（垂直於敵->我向量）
+                ax, ay = safe_unit(enemy.x - tank.x, enemy.y - tank.y)
+                sx, sy = -ay, ax
+                if random.random() < 0.5:
+                    sx, sy = -sx, -sy
+                px = tank.x + sx * TANK_SPEED
+                py = tank.y + sy * TANK_SPEED
+                move_cmd = self._best_move_toward_point(tank, px, py, walls)
+
+        # 6) 開火策略：能看到就打；看不到就拆牆開路
         fire_cmd = 0
-        if tank.ammo > 0:
+        if tank.ammo > 0 and self._fire_cd == 0:
             los_ok = has_line_of_sight(tank.x, tank.y, enemy.x, enemy.y, walls)
-            aim_err = angle_diff_deg(tank.turret_angle, angle_to_enemy)
+            aim_err = angle_diff_deg(tank.turret_angle, turret_cmd)
+
             if los_ok and aim_err <= self.aim_fire_threshold:
                 fire_cmd = 1
+                self._fire_cd = self.fire_cooldown_frames
+            else:
+                # 看不到敵人：找「第一個擋路的牆」並嘗試拆牆（非常關鍵，AI會變兇）
+                hit, hx, hy, hd = first_wall_hit_point(tank.x, tank.y, enemy.x, enemy.y, walls)
+                if hit and hd > 0 and hd < 500:
+                    # 砲塔轉向牆的阻擋點
+                    turret_cmd = vector_to_angle_deg(hx - tank.x, hy - tank.y)
+                    aim_err2 = angle_diff_deg(tank.turret_angle, turret_cmd)
+                    if aim_err2 <= 12:  # 拆牆容忍度可以大一點
+                        fire_cmd = 1
+                        self._fire_cd = self.fire_cooldown_frames
 
         return move_cmd, fire_cmd, turret_cmd
 
@@ -713,14 +874,31 @@ def main():
     walls.append(Wall(WORLD_WIDTH - BORDER_THICKNESS, 0, BORDER_THICKNESS, WORLD_HEIGHT))
 
     # 內部牆
-    for i in range(5):
-        x = 500 + i * 200
-        y = 600
-        walls.append(Wall(x, y, 120, 40))
-    for i in range(3):
-        x = 800
-        y = 400 + i * 200
-        walls.append(Wall(x, y, 40, 120))
+        # 內部牆（置中生成）
+    cx = WORLD_WIDTH // 2
+    cy = WORLD_HEIGHT // 2
+
+    # 參數：你可以自己調
+    H_COUNT = 5          # 橫向牆數量
+    V_COUNT = 3          # 縱向牆數量
+    GAP = 200            # 牆與牆中心間距（越大越散）
+    H_W, H_H = 120, 40   # 橫向牆尺寸
+    V_W, V_H = 40, 120   # 縱向牆尺寸
+
+    # 橫向牆：以 (cx, cy) 為中心左右展開
+    start_x = cx - (H_COUNT - 1) * GAP // 2
+    y = cy - H_H // 2
+    for i in range(H_COUNT):
+        x = start_x + i * GAP
+        walls.append(Wall(x, y, H_W, H_H))
+
+    # 縱向牆：以 (cx, cy) 為中心上下展開
+    start_y = cy - (V_COUNT - 1) * GAP // 2
+    x = cx - V_W // 2
+    for i in range(V_COUNT):
+        y = start_y + i * GAP
+        walls.append(Wall(x, y, V_W, V_H))
+
 
     # ---- 補給 ----
     supplies = []
@@ -748,7 +926,7 @@ def main():
 
     # ---- AI 載入 ----
     model_ai = ModelTankAI()
-    rule_ai  = RuleBasedAI()
+    rule_ai  = StrongAI()
 
     start_ticks = pygame.time.get_ticks()
     game_over = False
@@ -883,11 +1061,11 @@ def main():
             if remain_sec <= 0:
                 game_over = True
                 if team_scores["Green"] > team_scores["Blue"]:
-                    winner_text = "時間到！Green(模型) 勝利！"
+                    winner_text = "Green(model) WIN"
                 elif team_scores["Blue"] > team_scores["Green"]:
-                    winner_text = "時間到！Blue(AI) 勝利！"
+                    winner_text = "Blue(AI) WIN"
                 else:
-                    winner_text = "時間到！雙方平手！"
+                    winner_text = "DRAW"
 
         # ========================= 繪製 =========================
         screen.fill((30, 30, 30))
@@ -906,16 +1084,16 @@ def main():
             b.draw(screen, (camera_x, camera_y))
 
         ui_y = 10
-        screen.blit(font.render(f"Green(模型) 分數: {team_scores['Green']}", True, GREEN), (10, ui_y)); ui_y += 28
-        screen.blit(font.render(f"Blue(AI) 分數: {team_scores['Blue']}", True, BLUE), (10, ui_y)); ui_y += 28
-        screen.blit(font.render(f"剩餘時間: {remain_sec} 秒", True, WHITE), (10, ui_y)); ui_y += 28
+        screen.blit(font.render(f"Green(model) score: {team_scores['Green']}", True, GREEN), (10, ui_y)); ui_y += 28
+        screen.blit(font.render(f"Blue(AI) score: {team_scores['Blue']}", True, BLUE), (10, ui_y)); ui_y += 28
+        screen.blit(font.render(f"time: {remain_sec} s", True, WHITE), (10, ui_y)); ui_y += 28
 
         p1_info = font.render(f"Green: HP {tank_model.life} / Fuel {int(tank_model.fuel)} / Ammo {tank_model.ammo}", True, GREEN)
         p2_info = font.render(f"Blue : HP {tank_ai.life} / Fuel {int(tank_ai.fuel)} / Ammo {tank_ai.ammo}", True, BLUE)
         screen.blit(p1_info, (10, ui_y)); ui_y += 28
         screen.blit(p2_info, (10, ui_y)); ui_y += 28
 
-        cam_info = font.render("I/J/K/L 移動畫面 | ESC 離開", True, WHITE)
+        cam_info = font.render("I/J/K/L move | ESC leave", True, WHITE)
         screen.blit(cam_info, (10, SCREEN_HEIGHT - 30))
 
         if game_over:
