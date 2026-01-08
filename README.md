@@ -33,12 +33,12 @@ Tank battle-Decision tree
 
 1-4 限制(Constraints)
 ---
-語言:python
-環境版本:python3.13.7
+語言:python  
+環境版本:python3.13.7  
 作業系統:Windows 11專業版64位元
 
 硬體列表:  
-處理器:Intel(R) Core(TM) i7-9700KF CPU @ 3.60GHz
+處理器:Intel(R) Core(TM) i7-9700KF CPU @ 3.60GHz  
 顯卡型號:NVIDIA GeForce GT 730
 
 breakdown
