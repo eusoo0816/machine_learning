@@ -237,23 +237,7 @@ def main():
     else:
         print("\n[WARN] dodge 子集合資料太少或類別太少，略過 move_dodge_model。")
 
-    # (B) fight move
-    df_fight = df[df[LABEL_GOAL] == 0].copy()
-    if len(df_fight) >= 1500 and df_fight[LABEL_MOVE].nunique() > 1:
-        print(f"\n[INFO] Fight subset rows: {len(df_fight)}")
-        train_classifier(
-            df_fight[feature_cols],
-            df_fight[LABEL_MOVE],
-            df_fight[WEIGHT_COL],
-            "move_fight_model.joblib", OUT_DIR,
-            class_weight=None,
-            max_depth=12,
-            min_leaf=40
-        )
-    else:
-        print("\n[WARN] fight 子集合資料太少或類別太少，略過 move_fight_model。")
-
-    # (C) supply move (goal=1 or 2)
+    # (B) supply move (goal=1 or 2)
     df_sup = df[df[LABEL_GOAL].isin([1, 2])].copy()
     if len(df_sup) >= 1500 and df_sup[LABEL_MOVE].nunique() > 1:
         print(f"\n[INFO] Supply subset rows: {len(df_sup)}")
