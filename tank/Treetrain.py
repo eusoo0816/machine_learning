@@ -286,7 +286,7 @@ def main():
         )
 
     print("\n[DONE] Training finished.")
-    print("推論端建議：goal_model -> (goal=3用move_dodge / goal=1,2用move_supply / goal=0用move_fight) -> fire_model（can_fire==1 才用）")
+    print("推論端建議：goal_model -> (goal=3用move_dodge / goal=1,2用move_supply ) -> fire_model（can_fire==1 才用）")
 
 if __name__ == "__main__":
     main()
