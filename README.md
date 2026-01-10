@@ -54,8 +54,43 @@ breakdown
 ---
 API
 ---
-蒐集資料:https://github.com/eusoo0816/machine_learning/issues/4  
-訓練模型:https://github.com/eusoo0816/machine_learning/issues/3
+
+
+| 項目 | 說明 |
+|------|------|
+| **`ModelTankAI.decide`** | |
+| 功能 | Choose_action |
+| 輸入 | `tank` (自身), `enemy` (敵人), `supplies` (補給), `walls` (牆), `bullets` (子彈) |
+| 輸出 | `(move_cmd, fire_cmd, turret_cmd)` (移動指令, 開火指令, 砲塔角度) |
+| 方法邏輯 | 1. 提取遊戲特徵 (`build_features`)<br>2. 呼叫 `goal_model` 預測大目標 (0:戰鬥, 1:彈藥, 2:油料, 3:閃避)<br>3. 根據目標呼叫對應的移動模型 (`move_fight` 或 `move_supply`)<br>4. 呼叫 `fire_model` 決定是否開火 |
+| 使用方法 | 在遊戲主迴圈中每一幀呼叫，用來獲取 AI 下一步的行動 |
+
+| 項目 | 說明 |
+|------|------|
+| **`JoblibPolicy.predict_one`** | |
+| 功能 | Model_load (使用載入的模型進行預測) |
+| 輸入 | `feat_dict` (當前遊戲狀態的特徵字典) |
+| 輸出 | `int` (預測出的類別，如動作 ID) |
+| 方法邏輯 | 將字典轉換為 Pandas DataFrame，並呼叫 `self.model.predict()` |
+| 使用方法 | 被 `ModelTankAI.decide` 內部呼叫，用來取得具體的 Goal 或 Move 結果 |
+
+| 項目 | 說明 |
+|------|------|
+| **`train_classifier`** | |
+| 功能 | train, Model_save |
+| 輸入 | `X` (特徵數據), `y` (標籤), `sample_weight` (權重), `model_name` (儲存名稱) |
+| 輸出 | `clf` (訓練好的決策樹模型物件) |
+| 方法邏輯 | 1. 切割訓練集與測試集 (`train_test_split`)<br>2. 建立並訓練決策樹 (`DecisionTreeClassifier.fit`)<br>3. 評估準確率並印出報告<br>4. 使用 `joblib.dump` 將模型存檔 (Model_save) |
+| 使用方法 | 執行 `TANKTREEtrain.py` 的 main 函數時自動呼叫，用於生成 `.joblib` 模型檔 |
+
+| 項目 | 說明 |
+|------|------|
+| **`Tank.update`** | |
+| 功能 | Move tank |
+| 輸入 | `walls` (僅在 Playtree 版本中需要傳入以檢測碰撞) |
+| 輸出 | 無 (直接修改物件內部的 `x`, `y`, `fuel` 屬性) |
+| 方法邏輯 | 1. 檢查 `move_forward`, `move_left` 等布林值<br>2. 更新座標 `x += dx`, `y += dy`<br>3. 扣除油料 (`fuel`)<br>4. 限制邊界 (`clamp`) 與處理牆壁碰撞 |
+| 使用方法 | 在遊戲主迴圈中，每一幀對所有存活的坦克呼叫一次 |
 
 
 
