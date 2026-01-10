@@ -61,10 +61,29 @@ API
 
 
 
----
+
 決策樹(Decision tree)
 ---
-https://github.com/eusoo0816/machine_learning/issues/5
+https://github.com/eusoo0816/machine_learning/issues/5  
+
+Loss Function  
+---
+<img width="459" height="331" alt="image" src="https://github.com/user-attachments/assets/f4e3521a-a26a-4bb6-8068-6bcdf46b5a98" />  
+
+Learning Curve (Loss) - label=action  
+決定『要做什麼動作』
+
+Log Loss(縱軸):  
+模型犯錯的嚴重程度
+
+Training Samples:  
+多少筆資料來訓練模型
+
+Train Log Loss:模型在「看過的資料」上，判斷時「有沒有亂選」。  
+
+Val Log Loss:模型在「沒看過的資料」上，判斷時「有沒有亂選」。  
+
+
 
 資料蒐集策略
 ---
