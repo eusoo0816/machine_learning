@@ -18,8 +18,8 @@ Tank battle-Decision tree
 ---
 1.訓練後能使模型有明顯性能提升(如:開火頻率、命中率、閃躲能力等...)  
 2.遊戲分數隨資料蒐集數量呈現上升趨勢  
-<img width="620" height="471" alt="image" src="https://github.com/user-attachments/assets/ea32d999-e72d-4c06-aebf-948ae9660a0d" />
-
+<img width="620" height="471" alt="image" src="https://github.com/user-attachments/assets/ea32d999-e72d-4c06-aebf-948ae9660a0d" />  
+陰影是資料分數分布，中間的藍線是平均值
 
 1-3 介面需求(Interface Requirements)
 ---
@@ -43,14 +43,13 @@ Tank battle-Decision tree
 
 breakdown
 ---
-<img width="961" height="385" alt="image" src="https://github.com/user-attachments/assets/ff33af3f-7392-4b2b-96db-88b185d4e8e5" />
-
-<img width="841" height="312" alt="image" src="https://github.com/user-attachments/assets/e83d9b62-ac9b-4eff-9c84-051e48d41a9a" />
+<img width="1019" height="468" alt="image" src="https://github.com/user-attachments/assets/c185058a-d63e-4454-8961-8fe0553028e7" />  
 
 
 設計
 ---
-<img width="761" height="363" alt="image" src="https://github.com/user-attachments/assets/cce043d3-6853-4520-a55e-ac1add0bc7c6" />
+<img width="819" height="483" alt="image" src="https://github.com/user-attachments/assets/3b1f4371-4e90-4f78-bea1-af01ed64ea92" />  
+
 
 ---
 API
