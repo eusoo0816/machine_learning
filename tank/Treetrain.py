@@ -10,7 +10,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 DATA_DIR = r"C:\Users\kai\Desktop\Machinelearning\TANK\tree\treedata"
 OUT_DIR = DATA_DIR
 
-LABEL_GOAL = "action_goal"   # 0 fight / 1 ammo / 2 fuel / 3 dodge
+LABEL_GOAL = "action_goal"   # 1 ammo / 2 fuel / 3 dodge
 LABEL_MOVE = "action_move"
 LABEL_FIRE = "action_fire"
 
