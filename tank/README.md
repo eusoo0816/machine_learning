@@ -130,3 +130,9 @@ ai策略為一直開火
 成果
 ===
 demo影片:https://www.youtube.com/watch?v=XGUjDp7KjfQ
+
+分工表
+===
+<img width="790" height="89" alt="image" src="https://github.com/user-attachments/assets/1ead9237-d550-4298-82ba-5e85e2f5b8a8" />
+
+
