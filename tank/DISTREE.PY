@@ -1,3 +1,4 @@
+#本程式用途:讀取訓練資料自動匯出決策樹
 import os
 import glob
 import joblib
