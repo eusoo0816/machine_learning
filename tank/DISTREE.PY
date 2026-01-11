@@ -9,20 +9,16 @@ from sklearn.tree import plot_tree
 MODEL_DIR = r"C:\Users\kai\Desktop\Machinelearning\TANK\tree\treedata"
 OUT_DIR   = os.path.join(MODEL_DIR, "tree_plots")
 
-# 你想要的「報告用」深度（只顯示前幾層）
+
 REPORT_MAX_DEPTH = 4
 
-# 若樹太大，這個可以讓文字比較不爆
-BASE_FIGSIZE = (28, 14)   # (寬, 高) inch
-DPI = 200                 # png 清晰度
+
+BASE_FIGSIZE = (28, 14)  
+DPI = 200                 
 
 
 def load_model_bundle(path: str):
-    """
-    你的 joblib 存的是 dict:
-      {"model": clf, "feature_cols": [...]}
-    但也可能有人直接 dump clf，所以這裡做兼容。
-    """
+
     obj = joblib.load(path)
     if isinstance(obj, dict) and "model" in obj:
         clf = obj["model"]
@@ -34,10 +30,7 @@ def load_model_bundle(path: str):
 
 
 def plot_and_save_tree(clf, feature_names, class_names, out_base: str, max_depth=None):
-    """
-    out_base: 不含副檔名的輸出路徑（例如 .../tree_goal_model）
-    max_depth: None 表示整棵；數字表示只畫前幾層
-    """
+
     title = os.path.basename(out_base)
     if max_depth is not None:
         title += f" (top {max_depth} levels)"
@@ -130,7 +123,6 @@ def main():
             max_depth=None
         )
 
-        # 2) 報告用（只畫前幾層）
         plot_and_save_tree(
             clf,
             feature_names=feature_cols,
